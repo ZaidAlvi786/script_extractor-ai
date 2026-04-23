@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(npm uninstall *)",
+      "Bash(ffmpeg -version)",
+      "Bash(python3 -c \"import faster_whisper; print\\('faster-whisper OK'\\)\")",
+      "Bash(python3 -c \"import yt_dlp; print\\('yt-dlp OK'\\)\")",
+      "Bash(timeout 150 python3 scripts/transcribe.py \"https://www.instagram.com/reel/DTagXYMEzzd/?igsh=MXY2MXNkMTYxaTA3NA==\" base 5)",
+      "Bash(python3 -c \"import yt_dlp; print\\('yt-dlp:', yt_dlp.version.__version__\\)\")",
+      "Bash(python3 -c \"import sys; print\\(sys.path\\)\")",
+      "Read(//Users/apple/.pyenv/shims/**)",
+      "Bash(/Users/apple/.pyenv/shims/python3 -c \"import yt_dlp, faster_whisper; print\\('PyEnv Python OK — yt_dlp + faster_whisper installed'\\)\")",
+      "Bash(/Users/apple/.pyenv/versions/3.11.9/bin/python3 -c \"import yt_dlp, faster_whisper; print\\('Direct pyenv 3.11.9 OK'\\)\")",
+      "Bash(npm install *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}
