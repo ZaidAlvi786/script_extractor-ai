@@ -5,6 +5,20 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Search, Loader2, AlertCircle, Link2, RefreshCw } from "lucide-react";
 import AnalysisResultPanel from "./AnalysisResultPanel";
 
+/**
+ * Lenient URL normalizer — accepts "instagram.com/reel/...", "www.youtube.com/...",
+ * "youtu.be/abc", etc. Adds https:// when no scheme is present so users don't have to.
+ */
+function normalizeVideoUrl(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return "";
+  // Already has a scheme (http://, https://, ftp://, etc.) — leave it alone
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+  // "//example.com/..." → use https
+  if (trimmed.startsWith("//")) return `https:${trimmed}`;
+  return `https://${trimmed}`;
+}
+
 export default function VideoAnalyzer() {
   const [videoUrl, setVideoUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -13,7 +27,10 @@ export default function VideoAnalyzer() {
 
   const handleAnalyze = async (e?: React.FormEvent, forceRefresh = false) => {
     if (e) e.preventDefault();
-    if (!videoUrl.trim()) return;
+    const normalized = normalizeVideoUrl(videoUrl);
+    if (!normalized) return;
+    // Reflect the normalized form in the input so the user sees what we sent
+    if (normalized !== videoUrl) setVideoUrl(normalized);
 
     setLoading(true);
     setError(null);
@@ -24,7 +41,7 @@ export default function VideoAnalyzer() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          videoUrl: videoUrl.trim(),
+          videoUrl: normalized,
           skipCache: forceRefresh,
         }),
       });
@@ -55,7 +72,11 @@ export default function VideoAnalyzer() {
           <div className="relative group" suppressHydrationWarning>
             <Link2 className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-primary transition-colors w-5 h-5" />
             <input
-              type="url"
+              type="text"
+              inputMode="url"
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
               placeholder="Paste any Instagram Reel, TikTok, or YouTube Shorts URL..."
               value={videoUrl}
               onChange={(e) => setVideoUrl(e.target.value)}
