@@ -32,6 +32,7 @@ interface AnalysisData {
     }[];
     cta: string;
   };
+  phaseBreakdown?: { name: string; duration: number }[];
   viralFactors: {
     factor: string;
     explanation: string;
@@ -101,6 +102,7 @@ interface VideoIdea {
   emotion: string;
   audience: string;
   viralScore: number;
+  characterImage?: string; // NEW: high-quality image prompt for the idea's hero character
   phases: IdeaPhase[];
   hashtags: { instagram: string[]; tiktok: string[]; youtube: string[] };
   cta: string;
@@ -185,6 +187,7 @@ export default function AnalysisResultPanel({ data }: AnalysisResultPanelProps) 
   const [ideasLoading, setIdeasLoading] = useState(false);
   const [ideasError, setIdeasError]   = useState<string | null>(null);
   const [ideasDone, setIdeasDone]     = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const generateIdeas = async (skipCache = false) => {
     setIdeasLoading(true);
@@ -193,7 +196,11 @@ export default function AnalysisResultPanel({ data }: AnalysisResultPanelProps) 
       const res = await fetch("/api/video-ideas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ analysis: data, skipCache }),
+        body: JSON.stringify({
+          analysis: data,
+          skipCache,
+          phaseBreakdown: data.phaseBreakdown,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to generate ideas");
@@ -203,6 +210,33 @@ export default function AnalysisResultPanel({ data }: AnalysisResultPanelProps) 
       setIdeasError(err.message);
     } finally {
       setIdeasLoading(false);
+    }
+  };
+
+  const loadMoreIdeas = async () => {
+    setLoadingMore(true);
+    setIdeasError(null);
+    try {
+      const res = await fetch("/api/video-ideas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          analysis: data,
+          count: 10,
+          excludeTitles: ideas.map((i) => i.title).filter(Boolean),
+          phaseBreakdown: data.phaseBreakdown,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to generate more ideas");
+      const more: VideoIdea[] = json.ideas ?? [];
+      // Re-number incoming ideas so IDs are unique across the combined list
+      const renumbered = more.map((idea, i) => ({ ...idea, id: ideas.length + i + 1 }));
+      setIdeas((prev) => [...prev, ...renumbered]);
+    } catch (err: any) {
+      setIdeasError(err.message);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -307,6 +341,8 @@ export default function AnalysisResultPanel({ data }: AnalysisResultPanelProps) 
               loading={ideasLoading}
               error={ideasError}
               onRefresh={() => generateIdeas(true)}
+              onLoadMore={loadMoreIdeas}
+              loadingMore={loadingMore}
             />
           )}
           {activeTab === "transcript" && data.transcript && (
@@ -1460,6 +1496,25 @@ function IdeaCard({ idea, index }: { idea: VideoIdea; index: number }) {
           <p className="text-primary text-xs font-semibold italic leading-relaxed">"{idea.hook}"</p>
         </div>
 
+        {/* Character image prompt — high-quality prompt for DALL-E / Midjourney / Imagen */}
+        {idea.characterImage && idea.characterImage.length > 20 && (
+          <div
+            className="mt-3 p-3 rounded-xl bg-pink-500/5 border border-pink-500/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className="text-[9px] font-bold uppercase tracking-widest text-pink-400 flex items-center gap-1.5">
+                <ImageIcon className="w-3 h-3" />
+                Character Image Prompt
+              </span>
+              <CopyButton text={idea.characterImage} />
+            </div>
+            <p className="text-pink-100/80 text-[11px] leading-relaxed font-mono">
+              {idea.characterImage}
+            </p>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mt-3">
           <span className="text-[11px] text-gray-600 flex items-center gap-1.5">
             <Users className="w-3 h-3" />{idea.audience}
@@ -1597,9 +1652,11 @@ interface IdeasLabTabProps {
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
+  onLoadMore: () => void;
+  loadingMore: boolean;
 }
 
-function IdeasLabTab({ ideas, loading, error, onRefresh }: IdeasLabTabProps) {
+function IdeasLabTab({ ideas, loading, error, onRefresh, onLoadMore, loadingMore }: IdeasLabTabProps) {
   const [filter, setFilter] = useState("all");
 
   const filtered = filter === "all"
@@ -1702,6 +1759,32 @@ function IdeasLabTab({ ideas, loading, error, onRefresh }: IdeasLabTabProps) {
           filtered.map((idea, i) => <IdeaCard key={idea.id} idea={idea} index={i} />)
         )}
       </div>
+
+      {/* Show more — only visible when filter is "all" so the appended ideas are guaranteed to appear */}
+      {filter === "all" && ideas.length > 0 && (
+        <div className="flex flex-col items-center pt-2">
+          <button
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary/10 border border-primary/30 text-sm text-primary hover:bg-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {loadingMore ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Generating more…
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4" />
+                Show more ideas
+              </>
+            )}
+          </button>
+          {loadingMore && (
+            <p className="text-gray-500 text-xs mt-2">Cloning the mechanic with 10 new subjects…</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

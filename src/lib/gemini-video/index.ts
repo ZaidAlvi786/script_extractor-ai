@@ -215,3 +215,82 @@ export async function analyzeVideoWithGemini(
     void deleteFile(ai, file.name);
   }
 }
+
+/**
+ * Analyze a sequence of still frames with Gemini directly (no Files API upload).
+ * Used when we only have extracted frame images (not a full video file) and want
+ * to bypass OpenRouter's tight free-tier credit limits.
+ *
+ * Each frame is sent as an inline base64 image followed by a timestamp label,
+ * so Gemini sees them as a flipbook/timeline.
+ *
+ * @throws if GEMINI_API_KEY missing or Gemini returns an error.
+ */
+export async function analyzeFramesWithGemini(
+  frames: Array<{ dataUrl: string; timestamp: number }>,
+  systemPrompt: string,
+  userPrompt: string,
+  opts?: { model?: string; temperature?: number; maxTokens?: number }
+): Promise<{ content: string }> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY not configured");
+  }
+  if (!apiKey.startsWith("AIza")) {
+    throw new Error(
+      `GEMINI_API_KEY looks malformed (must start with "AIza"). Starts with "${apiKey.slice(0, 4)}".`
+    );
+  }
+  if (!frames.length) {
+    throw new Error("analyzeFramesWithGemini called with zero frames");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  const model = opts?.model ?? DEFAULT_MODEL;
+  const temperature = opts?.temperature ?? 0.2;
+  const maxOutputTokens = opts?.maxTokens ?? 6000;
+
+  // Build parts: frame label text + inline image, repeated, then the user prompt at the end.
+  const parts: Array<
+    { text: string } | { inlineData: { mimeType: string; data: string } }
+  > = [];
+
+  for (let i = 0; i < frames.length; i++) {
+    const f = frames[i];
+    parts.push({
+      text: `━━━ FRAME ${i + 1} / ${frames.length}  @  ${f.timestamp.toFixed(2)}s ━━━`,
+    });
+
+    // dataUrl format: "data:image/jpeg;base64,<base64>"
+    const match = f.dataUrl.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+    if (!match) {
+      throw new Error(`Frame ${i + 1} has malformed dataUrl (expected data:image/*;base64,...)`);
+    }
+    const [, mimeType, base64] = match;
+    parts.push({ inlineData: { mimeType, data: base64 } });
+  }
+
+  parts.push({ text: userPrompt });
+
+  console.log(
+    `[gemini-video] Direct-frames call with ${model}, ${frames.length} frames, maxTokens=${maxOutputTokens}`
+  );
+  const t0 = Date.now();
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: [{ role: "user", parts }],
+    config: {
+      systemInstruction: systemPrompt,
+      temperature,
+      maxOutputTokens,
+    },
+  });
+
+  const text = response.text ?? "";
+  console.log(
+    `[gemini-video] Direct-frames generated in ${((Date.now() - t0) / 1000).toFixed(1)}s, ${text.length} chars`
+  );
+
+  return { content: text };
+}

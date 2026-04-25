@@ -10,6 +10,7 @@ import {
 } from "@/lib/transcription";
 import {
   analyzeVideoWithGemini,
+  analyzeFramesWithGemini,
   isGeminiNativeEnabled,
 } from "@/lib/gemini-video";
 import { rmSync } from "fs";
@@ -105,10 +106,23 @@ For EVERY motion claim in "mo", you must be able to say "this is visible between
 If you cannot name the specific frame pair that shows a motion, DO NOT claim that motion — instead write "subject holds position".
 This is how we hit 90% accuracy: no hallucinated motion, only observed motion.
 
-━━━ OUTPUT FORMAT (compact JSON, short keys) ━━━
-{"s":{"h":"opening hook","sc":[{"n":1,"t":"0:00-0:03","nr":"exact words or dominant sound","v":"STATIC composition","mo":"UNIQUE motion/action with verbs and sub-timing","e":"emotion","ed":"editing","ds":"inferred","cs":7}],"c":"CTA"},"vf":[{"f":"factor","x":"explanation","i":"critical|strong|moderate|minimal","t":"timestamp"}],"vm":{"m":"moment","t":"time","p":"psychology"},"cp":[{"n":"subject name","r":"role","ip":"50+ word appearance","im":"signature motion across video","st":"screen %"}],"rg":{"cf":"formula","v":[{"n":"niche","i":"idea","t":"twist"}],"sh":"shooting","ed":"editing","sd":"sound","ps":"posting"},"mt":{"hs":8,"rs":7,"sh":9,"rv":8,"vp":8}}
+━━━ PHASE BREAKDOWN ("pb") — DURATIONS MUST MATCH THE REFERENCE ━━━
+Collapse the reference's scenes into EXACTLY 4 structural phases. These durations feed downstream idea generation — they MUST reflect the reference's real pacing, not a template.
+  Phase 1 "Pattern Interrupt" — the opening hook / shock moment
+  Phase 2 "Build Tension"     — setup / escalation
+  Phase 3 "Climax / Reveal"   — payoff / view-magnet moment
+  Phase 4 "Call to Action"    — closer / CTA
 
-Every scene MUST have a UNIQUE "mo". No duplicates. No lazy repetition. JSON only, no commentary, no markdown.`;
+Rules for "pb":
+  • "d" is integer seconds (round to nearest whole second, minimum 1).
+  • The four "d" values MUST sum to the reference video's total duration (rounded to nearest whole second).
+  • Derive each phase's duration by grouping the scenes whose timestamps fall inside it. Example: reference is 20s total, hook scene is 0-4s → Phase 1 d=4; scenes 4-6s build tension → Phase 2 d=2; scenes 6-12s climax → Phase 3 d=6; scenes 12-20s CTA → Phase 4 d=8.
+  • If a phase truly doesn't exist in the reference (e.g. no explicit CTA), still allocate a minimum of 1 second to it and trim another phase to compensate.
+
+━━━ OUTPUT FORMAT (compact JSON, short keys) ━━━
+{"s":{"h":"opening hook","sc":[{"n":1,"t":"0:00-0:03","nr":"exact words or dominant sound","v":"STATIC composition","mo":"UNIQUE motion/action with verbs and sub-timing","e":"emotion","ed":"editing","ds":"inferred","cs":7}],"c":"CTA"},"pb":[{"n":"Pattern Interrupt","d":4},{"n":"Build Tension","d":2},{"n":"Climax / Reveal","d":6},{"n":"Call to Action","d":8}],"vf":[{"f":"factor","x":"explanation","i":"critical|strong|moderate|minimal","t":"timestamp"}],"vm":{"m":"moment","t":"time","p":"psychology"},"cp":[{"n":"subject name","r":"role","ip":"50+ word appearance","im":"signature motion across video","st":"screen %"}],"rg":{"cf":"formula","v":[{"n":"niche","i":"idea","t":"twist"}],"sh":"shooting","ed":"editing","sd":"sound","ps":"posting"},"mt":{"hs":8,"rs":7,"sh":9,"rv":8,"vp":8}}
+
+Every scene MUST have a UNIQUE "mo". No duplicates. No lazy repetition. The "pb" array MUST have exactly 4 items in the order above. JSON only, no commentary, no markdown.`;
 
 /**
  * Appended to SYS_BASE when a verified transcript is available.
@@ -191,6 +205,90 @@ function labelForThumbnail(url: string): string {
   return "ADDITIONAL PREVIEW FRAME";
 }
 
+/**
+ * Bracket-balanced salvage for truncated/invalid JSON.
+ * Walks the content respecting strings and escapes, and finds the longest prefix
+ * that ends inside a complete top-level value. Closes any unclosed `{`/`[` brackets
+ * at the deepest safe position and returns the candidate string. Returns null if
+ * no plausible recovery exists.
+ */
+function salvageTruncatedJSON(content: string): string | null {
+  const start = content.indexOf("{");
+  if (start < 0) return null;
+
+  const stack: Array<"{" | "["> = [];
+  let inString = false;
+  let escape = false;
+  let lastSafeEnd = -1; // index (inclusive) where the top-level object was last fully closed
+
+  for (let i = start; i < content.length; i++) {
+    const ch = content[i];
+
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+
+    if (ch === "{" || ch === "[") {
+      stack.push(ch as "{" | "[");
+    } else if (ch === "}" || ch === "]") {
+      const top = stack.pop();
+      const expected = ch === "}" ? "{" : "[";
+      if (top !== expected) return null; // mismatched bracket, can't trust the stream
+      if (stack.length === 0) lastSafeEnd = i;
+    }
+  }
+
+  // Case A: content has at least one complete top-level object — use that.
+  if (lastSafeEnd > start) {
+    return content.slice(start, lastSafeEnd + 1);
+  }
+
+  // Case B: no complete top-level object, but the stream is consistent up to EOF.
+  // Truncate after the last complete value (comma) and close remaining brackets.
+  if (stack.length > 0 && !inString) {
+    // Find the last safe truncation point: last index where depth crossed a
+    // comma boundary (i.e., a value was just completed).
+    let truncAt = -1;
+    const stack2: string[] = [];
+    let inStr2 = false;
+    let esc2 = false;
+    for (let i = start; i < content.length; i++) {
+      const ch = content[i];
+      if (esc2) { esc2 = false; continue; }
+      if (ch === "\\") { esc2 = true; continue; }
+      if (ch === '"') { inStr2 = !inStr2; continue; }
+      if (inStr2) continue;
+      if (ch === "{" || ch === "[") stack2.push(ch);
+      else if (ch === "}" || ch === "]") stack2.pop();
+      else if (ch === "," && stack2.length > 0) truncAt = i;
+    }
+    if (truncAt > start) {
+      // Rebuild closers matching the stack AT that truncation point
+      const closers: string[] = [];
+      const stack3: string[] = [];
+      let inStr3 = false;
+      let esc3 = false;
+      for (let i = start; i <= truncAt; i++) {
+        const ch = content[i];
+        if (esc3) { esc3 = false; continue; }
+        if (ch === "\\") { esc3 = true; continue; }
+        if (ch === '"') { inStr3 = !inStr3; continue; }
+        if (inStr3) continue;
+        if (ch === "{" || ch === "[") stack3.push(ch);
+        else if (ch === "}" || ch === "]") stack3.pop();
+      }
+      for (let i = stack3.length - 1; i >= 0; i--) {
+        closers.push(stack3[i] === "{" ? "}" : "]");
+      }
+      // Drop the trailing comma, append closers
+      return content.slice(start, truncAt) + closers.join("");
+    }
+  }
+
+  return null;
+}
+
 /** Map compact AI response keys → full keys for the frontend. */
 function expandAnalysis(d: any, transcript: TranscriptionResult | null): any {
   if (!d) return d;
@@ -211,6 +309,12 @@ function expandAnalysis(d: any, transcript: TranscriptionResult | null): any {
       })),
       cta: d.s?.c || "",
     },
+    phaseBreakdown: Array.isArray(d.pb)
+      ? d.pb.slice(0, 4).map((p: any) => ({
+          name: String(p?.n ?? ""),
+          duration: Math.max(1, Math.round(Number(p?.d) || 0)),
+        }))
+      : [],
     viralFactors: (d.vf || []).map((f: any) => ({
       factor: f.f, explanation: f.x, impact: f.i, timestamp: f.t,
     })),
@@ -430,8 +534,10 @@ Generate a COMPLETE analysis with 6-10 detailed scenes, each with a UNIQUE motio
     // Priority:
     //   1. Gemini native video (most accurate — Gemini literally watches the mp4)
     //      Requires GEMINI_API_KEY + a locally downloaded video file from Python.
-    //   2. OpenAI gpt-4o with passed-in YouTube URL (legacy, rarely works)
-    //   3. OpenRouter Gemini 2.5 Flash with dense frames (reliable fallback)
+    //   2. Gemini direct with frames (uses GEMINI_API_KEY, bypasses OpenRouter's
+    //      tight free-tier credit limits — preferred over OpenRouter when we have frames)
+    //   3. OpenAI gpt-4o with passed-in YouTube URL (legacy, rarely works)
+    //   4. OpenRouter Gemini 2.5 Flash with dense frames (last-resort fallback)
     let content = "";
     const videoFilePath = transcript?.videoPath;
 
@@ -482,11 +588,56 @@ For character prompts: describe ONLY subjects visible in the video. Generate 4-1
         console.warn(
           `[analyze] Gemini native path failed: ${err?.message ?? err}. Falling back to frames.`
         );
+        // Fall through to Gemini-frames / OpenAI / OpenRouter paths below
+      }
+    }
+
+    // Path 2 — Gemini direct with frames (uses GEMINI_API_KEY, avoids OpenRouter credit limits)
+    if (!content && isGeminiNativeEnabled() && useRealFrames && realFrames.length > 0) {
+      try {
+        console.log(`[analyze] Trying Gemini direct-frames path (${realFrames.length} frames)`);
+        const framesNote = `\n\n━━━ DENSE FRAME TIMELINE ━━━
+${realFrames.length} REAL video frames sampled at ~${(realFrames.length / (realFrames[realFrames.length - 1].timestamp - realFrames[0].timestamp + 0.1)).toFixed(1)}fps across the whole video. These are the actual pixels — treat them as a flipbook.
+
+━━━ MOTION-EXTRACTION METHOD ━━━
+STEP 1 — Walk the frames pair by pair. For each adjacent pair, silently ask: "what moved/appeared/deformed?"
+STEP 2 — Group consecutive similar deltas into SCENES (a scene = run of frames sharing ONE micro-action).
+STEP 3 — For each scene: "t" = the real timestamp range, "v" = composition, "mo" = specific motion you can point to in the frame pairs.
+
+Hard rules:
+  • Only describe motion you can point to in a frame pair (no hallucination).
+  • Every "mo" contains at least one motion verb (enters, opens, tilts, drops, lifts, pushes, widens, retracts, rotates, slides, rises, falls, expands, contracts).
+  • No two scenes share semantically identical motion.
+  • If ALL frames look truly identical (static video), output 1 scene "mo: subject holds position" — do NOT fabricate 6 fake motions.`;
+
+        const userPromptForFrames = `Analyze this video: ${videoUrl}${meta ? `\nMetadata: ${meta}` : ""}${framesNote}${transcriptNote}
+
+FINAL CHECKLIST:
+  ✓ Did I compare adjacent frame pairs and describe the delta for each?
+  ✓ Is every scene's "mo" a motion I can POINT TO in specific frame numbers?
+  ✓ Are timestamps "t" derived from the actual frame timestamps (not invented like "1:55")?
+  ✓ Did I avoid forbidden phrases (same composition, camera maintains focus)?
+  ✓ Did I avoid inventing motion that's not visible between any frame pair?
+
+For character prompts: describe ONLY subjects visible in the images. Generate a COMPLETE analysis with 4-10 scenes, each with a UNIQUE motion grounded in specific frames.`;
+
+        const framesResult = await analyzeFramesWithGemini(
+          realFrames,
+          systemPrompt,
+          userPromptForFrames,
+          { temperature: 0.2, maxTokens: 6000 }
+        );
+        content = framesResult.content;
+        console.log("[analyze] Gemini direct-frames analysis succeeded");
+      } catch (err: any) {
+        console.warn(
+          `[analyze] Gemini direct-frames path failed: ${err?.message ?? err}. Falling back to OpenAI / OpenRouter.`
+        );
         // Fall through to OpenAI / OpenRouter paths below
       }
     }
 
-    // Path 2 — OpenAI gpt-4o with URL (legacy, only when no Gemini result)
+    // Path 3 — OpenAI gpt-4o with URL (legacy, only when no Gemini result)
     if (!content && process.env.OPENAI_API_KEY) {
       try {
         const openaiContent: any[] = [];
@@ -614,15 +765,22 @@ For character prompts: describe ONLY subjects visible in the images. Generate a 
     let raw: any = null;
     try {
       raw = JSON.parse(content);
-    } catch {
-      // Salvage a truncated response by closing at the last complete brace
-      try {
-        const cut = content.lastIndexOf("}");
-        if (cut > 0) raw = JSON.parse(content.slice(0, cut + 1));
-      } catch { /* fall through */ }
+    } catch (primaryErr: any) {
+      // Salvage: walk the content, track bracket depth (respecting strings/escapes),
+      // then try closing unclosed brackets at the deepest valid prefix.
+      const salvaged = salvageTruncatedJSON(content);
+      if (salvaged) {
+        try {
+          raw = JSON.parse(salvaged);
+          console.warn("[analyze] Recovered from truncated JSON via bracket-balanced salvage");
+        } catch { /* fall through */ }
+      }
 
       if (!raw) {
-        console.error("[analyze] JSON parse failed. Raw preview:", content.slice(0, 500));
+        console.error(
+          `[analyze] JSON parse failed: ${primaryErr?.message}. Length=${content.length}. ` +
+          `Head: ${content.slice(0, 400)}\n...Tail: ${content.slice(-400)}`
+        );
         return NextResponse.json(
           { error: "AI returned invalid data. Try again." },
           { status: 500 }
