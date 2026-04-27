@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
-import { LogOut, Settings, LayoutDashboard } from "lucide-react";
+import { LogOut, Settings, LayoutDashboard, PenLine } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -38,6 +38,10 @@ export default function Header({ user }: HeaderProps) {
         <Link href="/analyze" className="flex items-center gap-1.5 text-primary hover:text-primary/80 transition-colors font-medium">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
           Analyze
+        </Link>
+        <Link href="/script-writer" className="flex items-center gap-1.5 text-primary hover:text-primary/80 transition-colors font-medium">
+          <PenLine className="w-4 h-4" />
+          Script Writer
         </Link>
         
         {user ? (
