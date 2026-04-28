@@ -17,20 +17,34 @@ import {
   ImageIcon,
   RefreshCw,
   AlertCircle,
+  Upload,
+  X,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+type PhaseRole = "hook" | "context" | "curiosity" | "payoff" | "cta" | "payoff_cta";
 
 interface ScriptPhase {
   phase: number;
   name: string;
   duration: string;
+  role?: PhaseRole;
   script: string;
   visual: string;
   motion: string;
   veo3Prompt: string;
   characterImagePrompt: string;
 }
+
+const ROLE_BADGE: Record<PhaseRole, { label: string; className: string }> = {
+  hook:        { label: "HOOK",         className: "text-rose-300 bg-rose-500/10 border-rose-500/30" },
+  context:     { label: "CONTEXT",      className: "text-amber-300 bg-amber-500/10 border-amber-500/30" },
+  curiosity:   { label: "CURIOSITY",    className: "text-violet-300 bg-violet-500/10 border-violet-500/30" },
+  payoff:      { label: "PAYOFF",       className: "text-emerald-300 bg-emerald-500/10 border-emerald-500/30" },
+  cta:         { label: "CTA",          className: "text-cyan-300 bg-cyan-500/10 border-cyan-500/30" },
+  payoff_cta:  { label: "PAYOFF + CTA", className: "text-emerald-300 bg-emerald-500/10 border-emerald-500/30" },
+};
 
 interface ScriptResult {
   title: string;
@@ -75,8 +89,24 @@ const PHASE_BORDER = [
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+async function fileToBase64(file: File): Promise<{ base64: string; mime: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const result = String(reader.result);
+      const comma = result.indexOf(",");
+      resolve({ base64: result.slice(comma + 1), mime: file.type || "image/jpeg" });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function ScriptWriterPage() {
   // Brief form state
+  const [storyDetail, setStoryDetail] = useState("");
   const [character, setCharacter] = useState("");
   const [scriptType, setScriptType] = useState("");
   const [durationSec, setDurationSec] = useState(30);
@@ -84,12 +114,44 @@ export default function ScriptWriterPage() {
   const [referenceUrl, setReferenceUrl] = useState("");
   const [notes, setNotes] = useState("");
 
+  // Character reference image
+  const [characterImageFile, setCharacterImageFile] = useState<File | null>(null);
+  const [characterImagePreview, setCharacterImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Conversation state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refineText, setRefineText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!characterImageFile) {
+      setCharacterImagePreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(characterImageFile);
+    setCharacterImagePreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [characterImageFile]);
+
+  const handleImagePick = (file: File | null) => {
+    if (!file) {
+      setCharacterImageFile(null);
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setError("That file isn't an image.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setError("Image is over 4 MB — pick a smaller one.");
+      return;
+    }
+    setError(null);
+    setCharacterImageFile(file);
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -103,17 +165,37 @@ export default function ScriptWriterPage() {
     return null;
   })();
 
+  const buildBasePayload = async () => {
+    const payload: Record<string, unknown> = {
+      character,
+      scriptType,
+      audience,
+      durationSec,
+      referenceUrl,
+      notes,
+      storyDetail,
+    };
+    if (characterImageFile) {
+      const { base64, mime } = await fileToBase64(characterImageFile);
+      payload.characterImageBase64 = base64;
+      payload.characterImageMime = mime;
+    }
+    return payload;
+  };
+
   // ── Initial generate ──
   const handleGenerate = async () => {
-    if (!character.trim() && !scriptType.trim() && !notes.trim()) {
-      setError("Tell me at least the character or the script type before generating.");
+    if (!storyDetail.trim() && !character.trim() && !scriptType.trim() && !notes.trim()) {
+      setError("Tell me at least the story, the character, or the script type before generating.");
       return;
     }
 
     const briefSummary = [
+      storyDetail.trim() && `Story: ${storyDetail.trim()}`,
       scriptType.trim() && `Type: ${scriptType.trim()}`,
       character.trim() && `Character: ${character.trim()}`,
-      `Duration: ${durationSec}s`,
+      characterImageFile && `Character image: attached (${characterImageFile.name})`,
+      `Duration: ${durationSec}s · Flow phases ≤8s each`,
       `Audience: ${audience}`,
       referenceUrl.trim() && `Reference: ${referenceUrl.trim()}`,
       notes.trim() && `Notes: ${notes.trim()}`,
@@ -126,17 +208,11 @@ export default function ScriptWriterPage() {
     setError(null);
 
     try {
+      const payload = await buildBasePayload();
       const res = await fetch("/api/script-writer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          character,
-          scriptType,
-          audience,
-          durationSec,
-          referenceUrl,
-          notes,
-        }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to generate script");
@@ -159,19 +235,13 @@ export default function ScriptWriterPage() {
     setError(null);
 
     try {
+      const payload = await buildBasePayload();
+      payload.refineFeedback = feedback;
+      payload.previousScript = lastScript;
       const res = await fetch("/api/script-writer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          character,
-          scriptType,
-          audience,
-          durationSec,
-          referenceUrl,
-          notes,
-          refineFeedback: feedback,
-          previousScript: lastScript,
-        }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to refine script");
@@ -201,7 +271,7 @@ export default function ScriptWriterPage() {
           transition={{ delay: 0.1 }}
           className="text-4xl md:text-5xl font-extrabold leading-[1.1]"
         >
-          From <span className="text-primary italic">brief</span> to <span className="text-primary italic">Veo&nbsp;3-ready</span> script
+          From <span className="text-primary italic">story</span> to <span className="text-primary italic">Flow-ready</span> script
         </motion.h1>
         <motion.p
           initial={{ opacity: 0 }}
@@ -209,7 +279,7 @@ export default function ScriptWriterPage() {
           transition={{ delay: 0.2 }}
           className="text-gray-500 text-sm md:text-base max-w-2xl mx-auto"
         >
-          Describe the character, the vibe, the audience — get a 4-phase script with title, captions, hashtags and self-contained Veo&nbsp;3 prompts that don't drift.
+          Drop a story, attach the character — get a viral-tuned script split into ≤8s phases with title, captions, hashtags and Flow prompts that lock the same character across every clip.
         </motion.p>
       </section>
 
@@ -225,8 +295,62 @@ export default function ScriptWriterPage() {
             Tell me about it
           </h2>
 
+          <Field label="Your story / brief" required>
+            <textarea
+              value={storyDetail}
+              onChange={(e) => setStoryDetail(e.target.value)}
+              placeholder="What happens in the video? Who's in it? What's the punch?
+e.g. A guy unboxes 'premium' AliExpress headphones, pumps himself up on the camera — turns out the speaker is just a kazoo. Twist reveal at the end with him deadpan staring at it."
+              rows={4}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all resize-none"
+            />
+          </Field>
+
+          <Field label="Character reference image (highly recommended)">
+            <div className="flex items-start gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleImagePick(e.target.files?.[0] ?? null)}
+                className="hidden"
+              />
+              {characterImagePreview ? (
+                <div className="relative">
+                  <img
+                    src={characterImagePreview}
+                    alt="Character reference"
+                    className="w-24 h-24 rounded-xl object-cover border border-white/10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCharacterImageFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
+                    className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500/90 hover:bg-red-500 flex items-center justify-center text-white shadow-lg"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-24 h-24 rounded-xl border-2 border-dashed border-white/15 hover:border-primary/50 hover:bg-primary/5 flex flex-col items-center justify-center gap-1 text-gray-500 hover:text-primary transition-all"
+                >
+                  <Upload className="w-5 h-5" />
+                  <span className="text-[10px] font-medium">Upload</span>
+                </button>
+              )}
+              <p className="text-xs text-gray-500 leading-relaxed flex-1">
+                Attach a clear face photo of the character. The AI locks every Flow phase to this exact person so the character stays consistent across all clips. PNG / JPG / WebP, ≤4 MB.
+              </p>
+            </div>
+          </Field>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Character / subject" required>
+            <Field label="Character description (optional)">
               <textarea
                 value={character}
                 onChange={(e) => setCharacter(e.target.value)}
@@ -236,7 +360,7 @@ export default function ScriptWriterPage() {
               />
             </Field>
 
-            <Field label="Script type / niche" required>
+            <Field label="Script type / niche">
               <textarea
                 value={scriptType}
                 onChange={(e) => setScriptType(e.target.value)}
@@ -425,8 +549,46 @@ function UserBubble({ text }: { text: string }) {
   );
 }
 
+function CopyActionButton({
+  label,
+  sublabel,
+  text,
+  variant,
+}: {
+  label: string;
+  sublabel: string;
+  text: string;
+  variant: "primary" | "ghost";
+}) {
+  const [copied, setCopied] = useState(false);
+  const base =
+    "flex-1 flex flex-col items-start gap-0.5 px-4 py-3 rounded-xl border transition-all text-left";
+  const tone =
+    variant === "primary"
+      ? "bg-primary/15 border-primary/40 hover:bg-primary/25 text-white"
+      : "bg-white/5 border-white/10 hover:bg-white/10 text-gray-200";
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1800);
+      }}
+      className={`${base} ${tone}`}
+    >
+      <span className="flex items-center gap-2 text-sm font-bold">
+        {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+        {copied ? "Copied" : label}
+      </span>
+      <span className="text-[10px] text-gray-400 leading-tight">{sublabel}</span>
+    </button>
+  );
+}
+
 function AssistantBubble({ script }: { script: ScriptResult }) {
   const fullScriptText = buildFullScriptText(script);
+  const spokenScriptText = buildSpokenScriptText(script);
+  const flowPromptsText = buildFlowPromptsText(script);
 
   return (
     <motion.div
@@ -526,18 +688,51 @@ function AssistantBubble({ script }: { script: ScriptResult }) {
           tags={script.hashtags.tiktok}
         />
       </div>
+
+      {/* Copy actions */}
+      <div className="pt-4 border-t border-white/5 space-y-2">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+          Copy
+        </span>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <CopyActionButton
+            variant="primary"
+            label="Whole script"
+            sublabel="Title, captions, all phases, prompts, hashtags"
+            text={fullScriptText}
+          />
+          <CopyActionButton
+            variant="ghost"
+            label="Spoken dialogue"
+            sublabel="Just the lines to film, with phase + role"
+            text={spokenScriptText}
+          />
+          <CopyActionButton
+            variant="ghost"
+            label="Flow prompts"
+            sublabel={`All ${script.phases.length} per-phase Flow prompts`}
+            text={flowPromptsText}
+          />
+        </div>
+      </div>
     </motion.div>
   );
 }
 
 function PhaseCard({ phase, accentIdx }: { phase: ScriptPhase; accentIdx: number }) {
+  const badge = phase.role ? ROLE_BADGE[phase.role] : null;
   return (
     <div className={`rounded-xl p-4 border-l-2 ${PHASE_BORDER[accentIdx % PHASE_BORDER.length]} space-y-3`}>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <span className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-[11px] font-bold text-white">
           {phase.phase}
         </span>
         <span className="text-sm font-bold text-white">{phase.name}</span>
+        {badge && (
+          <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${badge.className}`}>
+            {badge.label}
+          </span>
+        )}
         <span className="ml-auto text-[10px] font-mono text-gray-500">{phase.duration}</span>
       </div>
 
@@ -628,17 +823,21 @@ function HashtagRow({
   );
 }
 
-// ─── Plain-text bundle for "Copy whole script" ────────────────────────────────
+// ─── Copy-text builders ───────────────────────────────────────────────────────
+
+function roleLabelFor(p: ScriptPhase): string {
+  return p.role ? ROLE_BADGE[p.role].label : p.name.toUpperCase();
+}
 
 function buildFullScriptText(s: ScriptResult): string {
   const phases = s.phases
     .map(
       (p) =>
-        `── PHASE ${p.phase}: ${p.name.toUpperCase()} (${p.duration}) ──\n` +
+        `── PHASE ${p.phase}: ${p.name.toUpperCase()} [${roleLabelFor(p)}] (${p.duration}) ──\n` +
         `SCRIPT: ${p.script}\n` +
         `VISUAL: ${p.visual}\n` +
         (p.motion ? `MOTION: ${p.motion}\n` : "") +
-        (p.veo3Prompt ? `VEO 3: ${p.veo3Prompt}\n` : "") +
+        (p.veo3Prompt ? `FLOW PROMPT: ${p.veo3Prompt}\n` : "") +
         (p.characterImagePrompt ? `CHARACTER IMAGE: ${p.characterImagePrompt}\n` : "")
     )
     .join("\n");
@@ -658,4 +857,20 @@ function buildFullScriptText(s: ScriptResult): string {
     (s.cta ? `CTA: ${s.cta}\n\n` : "\n") +
     `── HASHTAGS ──\n${tags}\n`
   );
+}
+
+function buildSpokenScriptText(s: ScriptResult): string {
+  const lines = s.phases
+    .map((p) => `[${p.duration} · ${roleLabelFor(p)}] ${p.script}`)
+    .join("\n\n");
+  return `★ ${s.title}\n\n${lines}${s.cta ? `\n\n[CTA] ${s.cta}` : ""}\n`;
+}
+
+function buildFlowPromptsText(s: ScriptResult): string {
+  return s.phases
+    .map(
+      (p) =>
+        `── PHASE ${p.phase}: ${roleLabelFor(p)} (${p.duration}) ──\n${p.veo3Prompt}\n`
+    )
+    .join("\n");
 }
