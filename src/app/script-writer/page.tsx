@@ -184,9 +184,9 @@ export default function ScriptWriterPage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-12 md:py-20 space-y-10" suppressHydrationWarning>
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12 md:py-20 space-y-8 md:space-y-10" suppressHydrationWarning>
       {/* Hero */}
-      <section className="text-center space-y-5">
+      <section className="text-center space-y-4 sm:space-y-5">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -199,7 +199,7 @@ export default function ScriptWriterPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="text-4xl md:text-5xl font-extrabold leading-[1.1]"
+          className="text-3xl sm:text-4xl md:text-5xl font-extrabold leading-[1.1]"
         >
           From <span className="text-primary italic">brief</span> to <span className="text-primary italic">Veo&nbsp;3-ready</span> script
         </motion.h1>
