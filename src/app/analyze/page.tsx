@@ -6,9 +6,9 @@ import VideoAnalyzer from "@/components/VideoAnalyzer";
 
 export default function AnalyzePage() {
   return (
-    <div className="max-w-7xl mx-auto px-6 py-12 md:py-24 space-y-12" suppressHydrationWarning>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12 md:py-24 space-y-8 md:space-y-12" suppressHydrationWarning>
       {/* Hero */}
-      <section className="text-center space-y-6">
+      <section className="text-center space-y-4 sm:space-y-6">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -22,7 +22,7 @@ export default function AnalyzePage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="text-4xl md:text-6xl font-extrabold max-w-4xl mx-auto leading-[1.1]"
+          className="text-3xl sm:text-4xl md:text-6xl font-extrabold max-w-4xl mx-auto leading-[1.1]"
         >
           Reverse-Engineer Any{" "}
           <span className="text-primary italic">Viral</span> Video
@@ -32,7 +32,7 @@ export default function AnalyzePage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="text-gray-400 text-lg max-w-2xl mx-auto"
+          className="text-gray-400 text-base sm:text-lg max-w-2xl mx-auto px-2"
         >
           Paste a video URL and our AI agent will extract the full script,
           identify what makes it go viral, generate character prompts, and give
