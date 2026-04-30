@@ -79,7 +79,7 @@ export default function Home() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-12 md:py-24 space-y-20" suppressHydrationWarning>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12 md:py-24 space-y-12 md:space-y-20" suppressHydrationWarning>
       {/* Hero Section */}
       <section className="text-center space-y-8">
         <motion.div
@@ -96,7 +96,7 @@ export default function Home() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="text-5xl md:text-7xl font-extrabold max-w-4xl mx-auto leading-[1.1]"
+          className="text-3xl sm:text-5xl md:text-7xl font-extrabold max-w-4xl mx-auto leading-[1.1]"
         >
           Generate <span className="text-primary italic">Viral</span> Instagram Content in Seconds
         </motion.h1>
@@ -105,7 +105,7 @@ export default function Home() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="text-gray-400 text-xl max-w-2xl mx-auto"
+          className="text-gray-400 text-base sm:text-lg md:text-xl max-w-2xl mx-auto px-4"
         >
           Stop staring at a blank screen. Enter your niche and let our AI generate high-performing hooks, scripts, and visual guides.
         </motion.p>
@@ -120,20 +120,28 @@ export default function Home() {
         >
           <form onSubmit={handleGenerate} className="space-y-4">
             <div className="relative group" suppressHydrationWarning>
-              <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-primary transition-colors" />
+              <Search className="absolute left-4 sm:left-6 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-primary transition-colors w-5 h-5" />
               <input
                 type="text"
                 placeholder="Enter your niche (e.g. Cat Story, AI SaaS, Fitness)..."
                 value={niche}
                 onChange={(e) => setNiche(e.target.value)}
-                className="w-full h-16 pl-14 pr-40 bg-white/5 border border-white/10 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 focus:bg-white/10 transition-all text-lg"
+                className="w-full h-16 pl-12 sm:pl-14 pr-16 sm:pr-40 bg-white/5 border border-white/10 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 focus:bg-white/10 transition-all text-base sm:text-lg"
               />
               <button
                 type="submit"
                 disabled={loading || !niche}
-                className="absolute right-2 top-2 bottom-2 px-8 bg-primary text-black font-bold rounded-xl hover:scale-[1.02] active:scale-95 disabled:opacity-50 transition-all shadow-lg shadow-primary/20 flex items-center gap-2"
+                className="absolute right-2 top-2 bottom-2 px-3 sm:px-8 bg-primary text-black font-bold rounded-xl hover:scale-[1.02] active:scale-95 disabled:opacity-50 transition-all shadow-lg shadow-primary/20 flex items-center gap-2"
+                aria-label="Generate Ideas"
               >
-                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Generate Ideas"}
+                {loading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <>
+                    <Sparkles className="w-5 h-5 sm:hidden" />
+                    <span className="hidden sm:inline">Generate Ideas</span>
+                  </>
+                )}
               </button>
             </div>
 
@@ -183,8 +191,10 @@ export default function Home() {
       {/* Ideas Section */}
       {(ideas.length > 0 || loading) && (
         <section className="space-y-8">
-          <div className="flex items-center justify-between">
-            <h2 className="text-3xl font-bold">Trending Ideas for <span className="text-primary italic">"{niche}"</span></h2>
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="text-2xl sm:text-3xl font-bold break-words min-w-0">
+              Trending Ideas for <span className="text-primary italic">"{niche}"</span>
+            </h2>
             <div className="h-px flex-1 mx-8 bg-gradient-to-r from-white/20 to-transparent hidden md:block" />
           </div>
           
