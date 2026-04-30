@@ -80,20 +80,21 @@ export default function VideoAnalyzer() {
               placeholder="Paste any Instagram Reel, TikTok, or YouTube Shorts URL..."
               value={videoUrl}
               onChange={(e) => setVideoUrl(e.target.value)}
-              className="w-full h-16 pl-14 pr-44 bg-white/5 border border-white/10 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 focus:bg-white/10 transition-all text-lg"
+              className="w-full h-16 pl-12 sm:pl-14 pr-16 sm:pr-44 bg-white/5 border border-white/10 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 focus:bg-white/10 transition-all text-base sm:text-lg"
               required
             />
             <button
               type="submit"
               disabled={loading || !videoUrl.trim()}
-              className="absolute right-2 top-2 bottom-2 px-8 bg-primary text-black font-bold rounded-xl hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:hover:scale-100 transition-all shadow-lg shadow-primary/20 flex items-center gap-2"
+              className="absolute right-2 top-2 bottom-2 px-3 sm:px-8 bg-primary text-black font-bold rounded-xl hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:hover:scale-100 transition-all shadow-lg shadow-primary/20 flex items-center gap-2"
+              aria-label="Analyze Video"
             >
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
                 <>
                   <Search className="w-5 h-5" />
-                  Analyze Video
+                  <span className="hidden sm:inline">Analyze Video</span>
                 </>
               )}
             </button>

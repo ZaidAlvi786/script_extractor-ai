@@ -197,6 +197,11 @@ export async function analyzeVideoWithGemini(
         systemInstruction: systemPrompt,
         temperature,
         maxOutputTokens,
+        // Disable Gemini 2.5 Flash's internal "thinking" tokens — they eat into
+        // maxOutputTokens and frequently cause the visible response to truncate
+        // mid-string at <1000 chars even when budget is 6000+. We need every
+        // available token for the JSON output.
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
 
