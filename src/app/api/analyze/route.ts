@@ -78,14 +78,49 @@ Real video has LAYERED motion — focal action + reactive micro-motions simultan
 BAD "mo": "spoon approaches, mouth opens, spoon enters" (ignores reaction)
 GOOD "mo": "spoon enters from right; baby's head tilts ~10° toward the approaching spoon in anticipation; mouth opens and cheeks widen as head continues leaning forward to meet the spoon; baby's head bobs gently once as segment is swallowed"
 
+━━━ KINEMATIC TIMELINE — MILLISECOND-LEVEL DETAIL (CRITICAL) ━━━
+Downstream tools paste your "mo" output into Veo 3 Fast to regenerate the video. Veo 3 Fast generates a single continuous take from your prompt and has THREE failure modes you must defend against:
+
+  1. TELEPORT GLITCH: subject shown at start, then suddenly at end with no in-between motion. Cause: only boundary frames described.
+  2. FAST-MOTION COMPRESSION: action plays in fast-forward. Cause: too many beats packed into short duration.
+  3. AUTOCOMPLETE OVERREACH: Veo invents motion not in the prompt. Cause: dead air / no explicit hold.
+
+Your "mo" must be a DENSE kinematic timeline — describe motion at sub-second resolution so the downstream Veo prompt has enough data to render smoothly.
+
+Tic density per scene:
+  • Scenes ≤ 2s: tic every 100-200ms (≥5 tics/second).
+  • Scenes 2-4s: tic every 200-300ms (≥3 tics/second).
+  • Scenes > 4s: tic every 300-500ms (≥2 tics/second).
+First tic = scene start time. Last tic = scene end time. NO gap longer than the rules above.
+
+For EACH motion at each tic capture:
+  • Position: exact screen coordinates (x=% width, y=% height) for moving elements
+  • Angle: body part orientation in degrees (head 8° left, shoulder 5° forward)
+  • Velocity verb: enters / decelerates / accelerates / drifts / snaps / holds (and approximate rate, e.g. "~25% screen-width per second")
+  • Parallel reactions: what every OTHER visible body part is doing at this same tic
+
+Use COORDINATES + ANGLES + DURATION, not vague directions:
+  ✓ "(0.00s) Silver spoon at x=95%, y=55% screen-right edge, stationary. (0.20s) Spoon begins traveling left at ~30%/sec, slight downward arc. (0.45s) Spoon reaches x=82%, y=56%; baby's head begins tilting 0→3° left simultaneously. (0.70s) Spoon at x=70%, y=57%; head at 5° tilt; eyebrows lift 1mm; lip-corners tighten 2mm. (0.95s) Spoon at x=58%, y=58% decelerating; head at 7° tilt; lower peel-flap begins opening 0→3mm. (1.20s) Spoon contacts peel-mouth at x=48%, y=58%; peel-flap fully open 6mm; head holds at 7°. (1.45s) Orange segment rolls off spoon into peel-mouth; baby's head bobs once 5° forward. (1.70s) Head settles back to 7° tilt; peel-mouth closes around segment; eyes still locked on spoon at x=50%."
+  ✗ "spoon moves toward the baby's mouth and the baby reacts"
+
+For human/animate subjects, write a LIMB CHECKLIST at each tic:
+  HEAD (angle, position) · EYEBROWS · EYELIDS · LIP-CORNERS · GAZE DIRECTION · NECK · SHOULDERS · HANDS · TORSO · HIPS · POSTURE
+  At every tic, name the limbs that are MOVING and the limbs that are HOLDING. Don't leave a body part undescribed at any tic — silence implies "static" and Veo will interpret silence creatively.
+
+PACING ANCHORS (cross-check your tics against these — if your "mo" describes more motion than fits at natural pace, you've compressed time and the downstream video will glitch):
+  • Eye blink: 100-150ms · Lip-corner tighten: 200-300ms · Head turn 90°: 400-600ms
+  • Hand reaching 30cm: 500-800ms · Object falling 30cm: ~250ms · ASMR slow-motion: 1500-2500ms
+  • CAP: ≤3 distinct actions per 1-second window at natural pace.
+
 ━━━ QUALITY RULES (MANDATORY) ━━━
 - 6-10 scenes. Each scene covers a UNIQUE micro-action or visual beat.
 - "nr" = actual spoken words / voiceover / on-screen text. If truly silent, describe the DOMINANT SOUND (crunch, slurp, sizzle, tap) — do NOT repeat "(No dialogue, ASMR sounds)" every scene.
 - "v" (VISUAL COMPOSITION) = the STATIC frame: framing, angle, colors, lighting, subject position — this part CAN stay similar across scenes if the camera didn't move.
-- "mo" (MOTION/ACTION) = the UNIQUE micro-action that happens in this 2-3s window, with motion verbs and sub-timing. EVERY SCENE'S "mo" MUST DIFFER FROM EVERY OTHER SCENE'S "mo".
+- "mo" (MOTION/ACTION) = the UNIQUE micro-action that happens in this 2-3s window, written as a KINEMATIC TIMELINE with at least 3 sub-time-tics (200-500ms apart) showing IN / BETWEEN / OUT positions. EVERY SCENE'S "mo" MUST DIFFER FROM EVERY OTHER SCENE'S "mo".
    BAD  mo: "orange baby on a table" (static — belongs in "v")
    BAD  mo: "orange baby sits still" (no motion)
-   GOOD mo: "(0.0-1.0s) A hand holding a silver spoon with a tiny orange segment enters from the right edge of frame. (1.0-2.0s) The spoon tilts forward and approaches the orange baby's lower peel, which begins to open like a mouth. (2.0-3.0s) The segment rolls off the spoon into the peel-mouth."
+   BAD  mo: "spoon enters and feeds the baby" (only 2 boundary points — Veo will glitch the middle)
+   GOOD mo: "(0.00-1.00s) Spoon enters from x=95% screen-right at y=55%, traveling left along a slight downward arc at ~25% screen-width per second. (1.00-2.00s) Spoon reaches x=70%; baby's head tilts from 0° to 8° left over the same window; lower peel-flap opens 6mm; eyebrows lift 2mm. (2.00-3.00s) Spoon decelerates to halt at x=48%, y=58%; orange segment rolls off spoon into peel-mouth; baby's head bobs once 5° forward then settles into freeze pose with eyes still locked on spoon."
 - "ed" = cut type, transition, text overlays, effects.
 - "cp" → "ip" = STATIC appearance (50+ words, exact as seen in thumbnails).
 - "cp" → "im" = SIGNATURE MOTION the subject does REPEATEDLY across the video (e.g. "opens peel-mouth to receive food, tilts head slightly, eyes stay fixed forward").
@@ -206,6 +241,63 @@ function labelForThumbnail(url: string): string {
 }
 
 /**
+ * Try to parse `content` as JSON, including via a sequence of recovery strategies:
+ *   1. Direct JSON.parse.
+ *   2. Try every top-level closure boundary from longest to shortest as a candidate
+ *      (handles Gemini glueing two objects together — `{...}{...}` — by taking the
+ *      first that parses).
+ *   3. salvageTruncatedJSON for mid-string / truncated cases.
+ * Returns the parsed value, or null if nothing recovers.
+ */
+function parseWithRecovery(content: string): any | null {
+  try { return JSON.parse(content); } catch { /* try recovery */ }
+
+  // Walk all top-level closure boundaries
+  const start = content.indexOf("{");
+  if (start < 0) return null;
+  const closures: number[] = [];
+  const stack: string[] = [];
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < content.length; i++) {
+    const ch = content[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") {
+      stack.pop();
+      if (stack.length === 0) closures.push(i);
+    }
+  }
+
+  // Try longest valid prefix first — preserves the most data when the model
+  // glued two top-level objects together (`{json1}{json2}`).
+  for (let i = closures.length - 1; i >= 0; i--) {
+    const candidate = content.slice(start, closures[i] + 1);
+    try {
+      const parsed = JSON.parse(candidate);
+      if (i < closures.length - 1) {
+        console.warn(`[analyze] Recovered by taking top-level prefix ending at ${closures[i]}/${content.length}`);
+      }
+      return parsed;
+    } catch { /* try next shorter candidate */ }
+  }
+
+  // Final: bracket-balanced salvage for mid-string / mid-object truncation.
+  const salvaged = salvageTruncatedJSON(content);
+  if (salvaged) {
+    try {
+      const parsed = JSON.parse(salvaged);
+      console.warn("[analyze] Recovered via bracket-balanced salvage");
+      return parsed;
+    } catch { /* nothing more we can do */ }
+  }
+  return null;
+}
+
+/**
  * Bracket-balanced salvage for truncated/invalid JSON.
  * Walks the content respecting strings and escapes, and finds the longest prefix
  * that ends inside a complete top-level value. Closes any unclosed `{`/`[` brackets
@@ -244,45 +336,77 @@ function salvageTruncatedJSON(content: string): string | null {
     return content.slice(start, lastSafeEnd + 1);
   }
 
-  // Case B: no complete top-level object, but the stream is consistent up to EOF.
-  // Truncate after the last complete value (comma) and close remaining brackets.
-  if (stack.length > 0 && !inString) {
-    // Find the last safe truncation point: last index where depth crossed a
-    // comma boundary (i.e., a value was just completed).
-    let truncAt = -1;
-    const stack2: string[] = [];
-    let inStr2 = false;
-    let esc2 = false;
-    for (let i = start; i < content.length; i++) {
-      const ch = content[i];
-      if (esc2) { esc2 = false; continue; }
-      if (ch === "\\") { esc2 = true; continue; }
-      if (ch === '"') { inStr2 = !inStr2; continue; }
-      if (inStr2) continue;
-      if (ch === "{" || ch === "[") stack2.push(ch);
-      else if (ch === "}" || ch === "]") stack2.pop();
-      else if (ch === "," && stack2.length > 0) truncAt = i;
+  // Case B: stream truncated. Find the last safe boundary (comma at depth>0
+  // OR a quote-closing of a string value followed by depth>0). Walk the content
+  // forward, tracking the deepest position where we could safely truncate AND
+  // still parse if we add closing brackets.
+  let truncAt = -1;
+  let truncStackSnapshot: string[] = [];
+  const stack2: string[] = [];
+  let inStr2 = false;
+  let esc2 = false;
+  let lastQuoteOutside = -1; // index of the last `"` that ENDED a string (we are not inside a string at i+1)
+  for (let i = start; i < content.length; i++) {
+    const ch = content[i];
+    if (esc2) { esc2 = false; continue; }
+    if (ch === "\\") { esc2 = true; continue; }
+    if (ch === '"') {
+      inStr2 = !inStr2;
+      if (!inStr2) lastQuoteOutside = i; // just exited a string
+      continue;
     }
-    if (truncAt > start) {
-      // Rebuild closers matching the stack AT that truncation point
-      const closers: string[] = [];
-      const stack3: string[] = [];
-      let inStr3 = false;
-      let esc3 = false;
-      for (let i = start; i <= truncAt; i++) {
-        const ch = content[i];
-        if (esc3) { esc3 = false; continue; }
-        if (ch === "\\") { esc3 = true; continue; }
-        if (ch === '"') { inStr3 = !inStr3; continue; }
-        if (inStr3) continue;
-        if (ch === "{" || ch === "[") stack3.push(ch);
-        else if (ch === "}" || ch === "]") stack3.pop();
+    if (inStr2) continue;
+    if (ch === "{" || ch === "[") stack2.push(ch);
+    else if (ch === "}" || ch === "]") stack2.pop();
+    else if (ch === "," && stack2.length > 0) {
+      truncAt = i;
+      truncStackSnapshot = [...stack2];
+    }
+  }
+
+  // Case B1: clean comma-boundary truncation.
+  if (truncAt > start && truncStackSnapshot.length > 0) {
+    const closers = truncStackSnapshot
+      .slice()
+      .reverse()
+      .map((c) => (c === "{" ? "}" : "]"))
+      .join("");
+    return content.slice(start, truncAt) + closers;
+  }
+
+  // Case B2: ran out mid-string. Close the open string at the LAST CLEAN BYTE
+  // (avoid breaking on a half-written escape), drop the half-written field's
+  // trailing partial chunk back to the previous comma, and close brackets.
+  if (inString && lastQuoteOutside > start) {
+    // Find the comma that came BEFORE we entered the half-written string.
+    // Walk from lastQuoteOutside backward to find the last comma at top-level depth.
+    let commaBefore = -1;
+    const stackB: string[] = [];
+    let inStrB = false;
+    let escB = false;
+    let lastCommaAtAnyDepth = -1;
+    let stackAtComma: string[] = [];
+    for (let i = start; i <= lastQuoteOutside; i++) {
+      const ch = content[i];
+      if (escB) { escB = false; continue; }
+      if (ch === "\\") { escB = true; continue; }
+      if (ch === '"') { inStrB = !inStrB; continue; }
+      if (inStrB) continue;
+      if (ch === "{" || ch === "[") stackB.push(ch);
+      else if (ch === "}" || ch === "]") stackB.pop();
+      else if (ch === "," && stackB.length > 0) {
+        lastCommaAtAnyDepth = i;
+        stackAtComma = [...stackB];
       }
-      for (let i = stack3.length - 1; i >= 0; i--) {
-        closers.push(stack3[i] === "{" ? "}" : "]");
-      }
-      // Drop the trailing comma, append closers
-      return content.slice(start, truncAt) + closers.join("");
+    }
+    commaBefore = lastCommaAtAnyDepth;
+    if (commaBefore > start && stackAtComma.length > 0) {
+      const closers = stackAtComma
+        .slice()
+        .reverse()
+        .map((c) => (c === "{" ? "}" : "]"))
+        .join("");
+      return content.slice(start, commaBefore) + closers;
     }
   }
 
@@ -580,7 +704,7 @@ For character prompts: describe ONLY subjects visible in the video. Generate 4-1
           videoFilePath,
           systemPrompt,
           userPromptForGemini,
-          { temperature: 0.2, maxTokens: 6000 }
+          { temperature: 0.2, maxTokens: 24000 }
         );
         content = geminiResult.content;
         console.log("[analyze] Gemini native video analysis succeeded");
@@ -625,7 +749,7 @@ For character prompts: describe ONLY subjects visible in the images. Generate a 
           realFrames,
           systemPrompt,
           userPromptForFrames,
-          { temperature: 0.2, maxTokens: 6000 }
+          { temperature: 0.2, maxTokens: 24000 }
         );
         content = framesResult.content;
         console.log("[analyze] Gemini direct-frames analysis succeeded");
@@ -762,30 +886,16 @@ For character prompts: describe ONLY subjects visible in the images. Generate a 
       content = content.slice(firstBrace, lastBrace + 1);
     }
 
-    let raw: any = null;
-    try {
-      raw = JSON.parse(content);
-    } catch (primaryErr: any) {
-      // Salvage: walk the content, track bracket depth (respecting strings/escapes),
-      // then try closing unclosed brackets at the deepest valid prefix.
-      const salvaged = salvageTruncatedJSON(content);
-      if (salvaged) {
-        try {
-          raw = JSON.parse(salvaged);
-          console.warn("[analyze] Recovered from truncated JSON via bracket-balanced salvage");
-        } catch { /* fall through */ }
-      }
-
-      if (!raw) {
-        console.error(
-          `[analyze] JSON parse failed: ${primaryErr?.message}. Length=${content.length}. ` +
-          `Head: ${content.slice(0, 400)}\n...Tail: ${content.slice(-400)}`
-        );
-        return NextResponse.json(
-          { error: "AI returned invalid data. Try again." },
-          { status: 500 }
-        );
-      }
+    const raw = parseWithRecovery(content);
+    if (!raw) {
+      console.error(
+        `[analyze] JSON parse failed (all recovery strategies exhausted). Length=${content.length}. ` +
+        `Head: ${content.slice(0, 400)}\n...Tail: ${content.slice(-400)}`
+      );
+      return NextResponse.json(
+        { error: "AI returned invalid data. Try again." },
+        { status: 500 }
+      );
     }
 
     if (!raw.s) {
